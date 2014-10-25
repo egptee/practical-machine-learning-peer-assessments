@@ -1,0 +1,87 @@
+---
+title: "Prediction for the manner"
+author: "YuXiao Zhang"
+date: "Monday, October 20, 2014"
+output: html_document
+---
+
+This document aims to predicting the manner in which the participants did in the exercise.The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. Meanwhile, all the details about this analysis like how the model was built, the configuration of the cross validation, the expected out of sample error , and the reason for the data partition, and so on, are also included in this report.   the data file were downloaded in the workspace.
+***Data Partition***  
+Here I decided to divided the training data downloaded from https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv into three partitions, with their  amount as  60%,20%,20% , for training, testing and final estimation. Because the observations are rich in number in this dataset, so it might be  a better choice.  
+
+```{r}
+library(caret)
+data<-read.csv("./pml-training.csv",header=TRUE)
+Tidx<-createDataPartition(data$classe,p=0.8,list=FALSE)
+training<-data[Tidx,]
+t<-data[-Tidx,]
+Tidx<-createDataPartition(t$classe,p=0.5,list=FALSE)
+testing<-t[Tidx,]
+esting<-t[-Tidx,]
+prop.table(table(training$classe))
+```  
+***Data exploration and PreProcession***   
+after the data partition, the training part contained 15699 obs,and 160 variables,a good sign was the proportion of each class was approximately equal except class A ,and  due to the big number of variables , it's not possibe to use featurePlot funtion then.
+
+first, checking the number of variables whose NAs turned to be more than half the observations  
+```{r}  
+h<-apply(training,2,function(x){
+  sum(is.na(x))>length(x)/2
+})
+sum(h)
+hna<-h
+h<-!h
+```  
+so i just excluded those variables with the handle "h" got from above. (h was used as final variable chooser)
+
+another way to relieve many-variable situation is to use the nearZeroVar func to eliminate some variables.    
+```{r}
+nsv<- nearZeroVar(training[,-160],saveMetrics=TRUE)
+th<-nsv$nzv
+sum(th)
+head(nsv)
+```    
+By  using the function of nearZeroVar, we eliminated 59 variables that might not be helpful. then combine the result.
+```{r}
+h[-160]<-(!th) & h[-160]
+```    
+then eliminated the name variable and time variable ,which might not be important for classification
+```{r}
+h[1:2]<-FALSE #x and user_name 
+h[grep("timestamp",colnames(training))]<-FALSE
+ sum(h)
+head(training[,h],1)
+```  
+***Training & result***  
+from the above two process, only 58 variables were left,which would benefit the computing speed. as for the predicting model, I chose random forest,which is an unexcelled classification model until now, an alternative choice is SVM, which might have a better robustness and a faster training  speed.
+
+firstly , tried the glm to predict. because glm usually used for distinguishing two classes, it's better to use it for predicting the class A from not A.  to achieve this, the classe variable needed to be preprocessed  
+```{r}
+trainlag<-training$classe#save the training outcome
+flag<-rep("A",nrow(training))
+flag[training$classe!="A"]="NA"
+training$classe<-as.factor(flag)
+testlag<-testing$classe#save test outcome
+flag<-rep("A",nrow(testing))
+flag[testing$classe!="A"]="NA"
+testing$classe<-as.factor(flag)
+```  
+then test the training process with reduced variables   
+```{r,cache=TRUE}
+fita<-train(classe~.,data=training[,h],method="glm",preProcess=c("center","scale"),trControl=trainControl(method="none"))
+confusionMatrix(testing$classe,predict(fita,testing[,h]))
+```  
+It was fast. but the result was still not good enough. The accuracy was only 89%, the err rate might be between 11%- 9.65%, not good enough for this project's task.
+then try the random forest tree. in additional, the classe needed got recovered, and  there was no need to scale the variables    
+```{r,cache=TRUE}
+training$classe<-trainlag
+testing$classe<-testlag
+fit2<-train(classe~.,data=training[,h],method="rf")
+confusionMatrix(testing$classe,predict(fit2,testing[,h]))
+```  
+it took about 1.5h to calculate this. but the result was quite good. The accuracy was 99.75%, and details about the prediction for each variable can be seen above. then, to go further to get a better estimate by using the esting data.  
+```{r}
+confusionMatrix(esting$classe,predict(fit2,esting[,h]))
+```  
+***Final result***  
+the esting data showed a good result,too. the accuracy was 99.8%, which was in the confidence interval calculated above. So the more objective accurace was 99.8%, and the err rate estimate was between  0.52%-0.06% . This was good enough to predict the project's task.
